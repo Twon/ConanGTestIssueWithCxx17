@@ -1,0 +1,137 @@
+name: CMake
+
+on:
+  push:
+    branches: '*'
+  pull_request:
+    branches: '*'
+
+jobs:
+  build:
+    name: ${{ matrix.settings.name }} ${{ matrix.configuration }}
+    runs-on: ${{ matrix.settings.os }}
+    strategy:
+      matrix:
+        configuration: [ "Release", "Debug" ]
+        settings:
+#          - {
+#              name: "Ubuntu GCC-13",
+#              os: ubuntu-latest,
+#              compiler: { type: GCC, version: 13, conan: "gcc", cc: "gcc-13", cxx: "g++-13", std: 17 },
+#              lib: "libstdc++11"
+#            }
+#          - {
+#              name: "Ubuntu Clang-16 + libc++",
+#              os: ubuntu-latest,
+#              compiler:
+#                {
+#                  type: CLANG,
+#                  version: 16,
+#                  conan: "clang",
+#                  cc: "clang-16",
+#                  cxx: "clang++-16",
+#                  std: 17
+#                },
+#              lib: "libc++",
+#            }
+          - {
+              name: "Visual Studio 2019",
+              os: windows-latest,
+              compiler: { type: VISUAL, version: 16, conan: "mscv", cc: "cl", cxx: "cl", std: 17 },
+            }
+    steps:
+      - uses: actions/checkout@v4.1.1
+
+      - name: Add msbuild to PATH
+        if: matrix.settings.os == 'windows-latest'
+        uses: microsoft/setup-msbuild@v1.3.1
+        with:
+          vs-version: "16.5"
+
+      - name: Install Latest GCC
+        if: matrix.settings.compiler.type == 'GCC'
+        uses: egor-tensin/setup-gcc@v1.3
+        with:
+          version: ${{ matrix.settings.compiler.version }}
+          platform: x64
+
+      - name: Install Latest libstdC++11
+        if: matrix.settings.compiler.type == 'CLANG' && matrix.settings.lib == 'libstdc++11'
+        uses: egor-tensin/setup-gcc@v1.3
+        with:
+          version: 12
+          platform: x64
+
+      - name: Install Clang
+        if: matrix.settings.compiler.type == 'CLANG'
+        uses: egor-tensin/setup-clang@v1.4
+        with:
+          version: ${{ matrix.settings.compiler.version }}
+          platform: x64
+
+      - name: Install Libc++
+        if: matrix.settings.compiler.type == 'CLANG' && matrix.settings.lib == 'libc++'
+        shell: bash
+        run: |
+          sudo apt install -y libc++-${{ matrix.settings.compiler.version }}-dev libc++abi-${{ matrix.settings.compiler.version }}-dev libunwind-${{ matrix.settings.compiler.version }}-dev
+
+      - name: Set up Python
+        uses: actions/setup-python@v4.7.1
+        with:
+          python-version: '3.11'
+
+      - name: Install Python requirements
+        run: |
+          pip install conan 
+
+      - name: Configure Conan
+        shell: bash
+        run: |
+          conan profile detect --force
+          sed -i.backup '/^\[settings\]$/,/^\[/ s/^build_type=.*/build_type=${{ matrix.configuration }}/' .conan2/profiles/default
+          sed -i.backup '/^\[settings\]$/,/^\[/ s/^compiler.cppstd=.*/compiler.cppstd=${{ matrix.settings.compiler.std }}/' .conan2/profiles/default
+          if [[ "${{ matrix.settings.compiler.type }}" == "GCC" || "${{ matrix.settings.compiler.type }}" == "CLANG" ]]; then
+            sed -i.backup '/^\[settings\]$/,/^\[/ s/^compiler=.*/compiler=${{ matrix.settings.compiler.conan }}/' .conan2/profiles/default
+            sed -i.backup '/^\[settings\]$/,/^\[/ s/^compiler.version=.*/compiler.version=${{ matrix.settings.compiler.version }}/' .conan2/profiles/default
+            sed -i.backup '/^\[settings\]$/,/^\[/ s/^compiler.libcxx=.*/compiler.libcxx=${{ matrix.settings.lib }}/' .conan2/profiles/default
+          fi
+
+          conan profile show -pr default
+
+      - name: Configure Install
+        working-directory: ${{github.workspace}}
+        shell: bash
+        run: |
+          conan install "${{github.workspace}}" --build missing -pr:b default 
+
+      - name: Configure CMake
+        if: matrix.settings.os == 'windows-latest'
+        shell: cmd
+        run: |
+          cmake --version
+          cmake --preset conan-default
+
+      - name: Configure CMake
+        if: matrix.settings.os != 'windows-latest'
+        shell: bash
+        run: |
+          cmake --preset conan-default 
+
+      - name: Conan Preset
+        shell: bash
+        run: echo "CONAN_PRESET=conan-$(echo ${{matrix.configuration}} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Build
+        if: matrix.settings.os == 'windows-latest'
+        shell: cmd
+        run: |
+          cmake --build --preset ${{ env.CONAN_PRESET }}
+
+      - name: Build
+        if: matrix.settings.os != 'windows-latest'
+        shell: bash
+        run: |
+          cmake --build --preset ${{ env.CONAN_PRESET }}
+
+      - name: Test
+        run: ctest --preset ${{ env.CONAN_PRESET }} 
