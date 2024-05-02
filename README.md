@@ -1,0 +1,1 @@
+A minimal reproduction case to demonstrate the issue with the Conan cached version of GTest package when compiling with C++17 onwards
