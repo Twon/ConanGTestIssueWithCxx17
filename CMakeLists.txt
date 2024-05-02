@@ -14,6 +14,7 @@ target_sources(ConanGTestIssueWithCxx17
 target_link_libraries(ConanGTestIssueWithCxx17
     PRIVATE
         gtest::gtest
+        GTest::gmock
 )
 set_target_properties(ConanGTestIssueWithCxx17
     PROPERTIES
